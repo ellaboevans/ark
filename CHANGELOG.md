@@ -2,6 +2,22 @@
 
 All notable changes to the Ark extension will be documented in this file.
 
+## [1.2.0] - 2026-03-27
+
+### Added
+
+- **Visual Backup Feedback**: Real-time status updates when backups occur
+  - Status bar shows spinning animation during backup operations
+  - Toast notification appears on backup completion with extension/settings count
+  - Applies to both manual and auto-backups
+  - Clear visual distinction between pending and in-progress states
+
+### Improved
+
+- Better user confidence that auto-backup is working silently
+- Immediate visual feedback on backup completion
+- Enhanced UX with status bar icon animations
+
 ## [1.1.0] - 2026-03-27
 
 ### Added

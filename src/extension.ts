@@ -101,6 +101,8 @@ async function handleBackup(context: vscode.ExtensionContext): Promise<void> {
       return;
     }
 
+    updateStatusBarBacking();
+
     await vscode.window.withProgress(
       {
         location: vscode.ProgressLocation.Notification,
@@ -318,12 +320,28 @@ function updateStatusBar(): void {
   statusBarItem.show();
 }
 
+function updateStatusBarBacking(): void {
+  statusBarItem.text = "$(sync~spin) Ark: Backing up...";
+  statusBarItem.tooltip = "Backup in progress...";
+  statusBarItem.show();
+}
+
+function showBackupCompleteNotification(
+  extensionCount: number,
+  settingsCount: number,
+): void {
+  const message = `✅ Backup complete! ${extensionCount} extensions, ${settingsCount} settings saved.`;
+  vscode.window.showInformationMessage(`Ark: ${message}`);
+}
+
 async function performSilentBackup(): Promise<void> {
   try {
     const pat = await getPat(extensionContext);
     if (!pat) {
       return; // No token, skip silent backup
     }
+
+    updateStatusBarBacking();
 
     const backup = createBackupData();
     const existingGistId =
@@ -351,6 +369,11 @@ async function performSilentBackup(): Promise<void> {
     await extensionContext.globalState.update(LAST_BACKUP_KEY, Date.now());
     updateStatusBar();
     sidebarProvider.refresh();
+
+    // Show completion notification with details
+    const extensionCount = countNonBuiltInExtensions();
+    const settingsCount = Object.keys(backup.settings).length;
+    showBackupCompleteNotification(extensionCount, settingsCount);
   } catch (error) {
     console.error("Ark: Silent backup failed:", error);
   }
@@ -361,7 +384,7 @@ function scheduleAutoBackup(): void {
     clearTimeout(debounceTimer);
   }
 
-  statusBarItem.text = "$(sync~spin) Ark: Pending...";
+  statusBarItem.text = "$(sync~spin) Ark: Backing up...";
 
   debounceTimer = setTimeout(async () => {
     await performSilentBackup();
