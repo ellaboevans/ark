@@ -1,0 +1,37 @@
+name: Publish to Marketplace
+
+on:
+  push:
+    tags:
+      - 'v[0-9]+.[0-9]+.[0-9]+'  # Publish only on version tags (v1.0.0, v1.0.1, etc.)
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest  # Publish only on Linux to avoid duplicate releases
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Use Node.js 18.x
+        uses: actions/setup-node@v4
+        with:
+          node-version: 18.x
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Publish to Marketplace
+        run: npx vsce publish -p ${{ secrets.VSCE_PAT }}
+
+      - name: Package for release
+        run: npx vsce package --out ./ark-${{ github.ref_name }}.vsix
+
+      - name: Upload .vsix to Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: ./ark-${{ github.ref_name }}.vsix
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

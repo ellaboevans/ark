@@ -1,23 +1,37 @@
 {
   "name": "ark",
-  "displayName": "Ark",
-  "description": "Your VS Code recovery kit for extensions and settings backups.",
+  "displayName": "Ark - Disaster Recovery for Developers",
+  "description": "Backup and restore your VS Code extensions and settings to a private GitHub Gist. Your complete recovery kit for developer environments.",
   "version": "1.0.0",
-  "publisher": "ark",
+  "publisher": "ellaboevans",
+  "author": {
+    "name": "Evans Elabo",
+    "url": "https://github.com/ellaboevans"
+  },
   "license": "MIT",
   "repository": {
     "type": "git",
     "url": "https://github.com/ellaboevans/ark.git"
   },
+  "bugs": {
+    "url": "https://github.com/ellaboevans/ark/issues"
+  },
+  "homepage": "https://github.com/ellaboevans/ark#readme",
   "keywords": [
     "backup",
     "restore",
     "recovery",
     "extensions",
     "settings",
+    "sync",
     "gist",
+    "github",
     "developer-tools",
-    "disaster-recovery"
+    "disaster-recovery",
+    "environment",
+    "setup",
+    "vscode",
+    "workflow"
   ],
   "galleryBanner": {
     "color": "#0F766E",
@@ -27,30 +41,36 @@
     "vscode": "^1.80.0"
   },
   "categories": [
-    "Other"
+    "Other",
+    "SCM Providers"
   ],
   "activationEvents": [
     "onStartupFinished"
   ],
   "main": "./dist/extension.js",
   "icon": "assets/ark-logo-placeholder.png",
+  "pricing": "Free",
   "contributes": {
     "commands": [
       {
         "command": "ark.backup",
-        "title": "Ark: Backup now"
+        "title": "Ark: Backup now",
+        "category": "Ark"
       },
       {
         "command": "ark.restore",
-        "title": "Ark: Restore from backup"
+        "title": "Ark: Restore from backup",
+        "category": "Ark"
       },
       {
         "command": "ark.setPat",
-        "title": "Ark: Set GitHub token"
+        "title": "Ark: Set GitHub token",
+        "category": "Ark"
       },
       {
         "command": "ark.refreshSidebar",
-        "title": "Ark: Refresh Sidebar"
+        "title": "Ark: Refresh Sidebar",
+        "category": "Ark"
       }
     ],
     "viewsContainers": {
@@ -77,11 +97,13 @@
     "vscode:prepublish": "npm run build",
     "build": "esbuild src/extension.ts --bundle --outfile=dist/extension.js --external:vscode --format=cjs --platform=node --target=node18",
     "watch": "esbuild src/extension.ts --bundle --outfile=dist/extension.js --external:vscode --format=cjs --platform=node --target=node18 --watch",
-    "lint": "tsc --noEmit"
+    "lint": "tsc --noEmit",
+    "test": "node ./out/test/runTest.js"
   },
   "devDependencies": {
     "@types/node": "^18.0.0",
     "@types/vscode": "^1.80.0",
+    "@vscode/test-electron": "^2.3.0",
     "esbuild": "^0.20.0",
     "typescript": "^5.3.0"
   }
