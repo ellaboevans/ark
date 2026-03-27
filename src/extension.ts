@@ -2,7 +2,18 @@ import * as vscode from "vscode";
 import { createBackupData, countNonBuiltInExtensions } from "./backup";
 import { createGist, updateGist, verifyPat } from "./gist";
 import { runRestore } from "./restore";
-import { PAT_SECRET_KEY, GIST_ID_KEY } from "./constants/extension";
+import { ArkSidebarProvider } from "./sidebar";
+import {
+  PAT_SECRET_KEY,
+  GIST_ID_KEY,
+  LAST_BACKUP_KEY,
+  AUTO_BACKUP_DEBOUNCE_MS,
+} from "./constants/extension";
+
+let statusBarItem: vscode.StatusBarItem;
+let debounceTimer: NodeJS.Timeout | undefined;
+let extensionContext: vscode.ExtensionContext;
+let sidebarProvider: ArkSidebarProvider;
 
 async function getPat(
   context: vscode.ExtensionContext,
@@ -125,6 +136,9 @@ async function handleBackup(context: vscode.ExtensionContext): Promise<void> {
       },
     );
 
+    await context.globalState.update(LAST_BACKUP_KEY, Date.now());
+    updateStatusBar();
+
     const extensionCount = countNonBuiltInExtensions();
     vscode.window.showInformationMessage(
       `Ark: Backup complete! Saved ${extensionCount} extensions and your settings.`,
@@ -186,24 +200,168 @@ async function checkForNewMachine(
   }
 }
 
-export function activate(context: vscode.ExtensionContext): void {
-  const backupCommand = vscode.commands.registerCommand("ark.backup", () => {
-    handleBackup(context);
+function formatTimeSince(timestamp: number): string {
+  const now = Date.now();
+  const diffMs = now - timestamp;
+  const diffSeconds = Math.floor(diffMs / 1000);
+  const diffMinutes = Math.floor(diffSeconds / 60);
+  const diffHours = Math.floor(diffMinutes / 60);
+  const diffDays = Math.floor(diffHours / 24);
+
+  if (diffSeconds < 60) {
+    return "just now";
+  } else if (diffMinutes < 60) {
+    return `${diffMinutes} min ago`;
+  } else if (diffHours < 24) {
+    return `${diffHours} hr ago`;
+  } else {
+    return `${diffDays} day${diffDays > 1 ? "s" : ""} ago`;
+  }
+}
+
+function updateStatusBar(): void {
+  const lastBackup = extensionContext.globalState.get<number>(LAST_BACKUP_KEY);
+
+  if (lastBackup) {
+    statusBarItem.text = `$(cloud-upload) Ark: ${formatTimeSince(lastBackup)}`;
+    statusBarItem.tooltip = `Last backup: ${new Date(lastBackup).toLocaleString()}\nClick to backup now`;
+  } else {
+    statusBarItem.text = "$(cloud-upload) Ark: No backup";
+    statusBarItem.tooltip = "Click to create your first backup";
+  }
+
+  statusBarItem.show();
+}
+
+async function performSilentBackup(): Promise<void> {
+  try {
+    const pat = await getPat(extensionContext);
+    if (!pat) {
+      return; // No token, skip silent backup
+    }
+
+    const backup = createBackupData();
+    const existingGistId =
+      extensionContext.globalState.get<string>(GIST_ID_KEY);
+
+    if (existingGistId) {
+      try {
+        await updateGist(pat, existingGistId, backup);
+      } catch (error) {
+        if (error instanceof Error && error.message.includes("404")) {
+          const newGistId = await createGist(pat, backup);
+          await extensionContext.globalState.update(GIST_ID_KEY, newGistId);
+        } else {
+          throw error;
+        }
+      }
+    } else {
+      const gistId = await createGist(pat, backup);
+      await extensionContext.globalState.update(GIST_ID_KEY, gistId);
+    }
+
+    await extensionContext.globalState.update(LAST_BACKUP_KEY, Date.now());
+    updateStatusBar();
+    sidebarProvider.refresh();
+  } catch (error) {
+    console.error("Ark: Silent backup failed:", error);
+  }
+}
+
+function scheduleAutoBackup(): void {
+  if (debounceTimer) {
+    clearTimeout(debounceTimer);
+  }
+
+  statusBarItem.text = "$(sync~spin) Ark: Pending...";
+
+  debounceTimer = setTimeout(async () => {
+    await performSilentBackup();
+    debounceTimer = undefined;
+  }, AUTO_BACKUP_DEBOUNCE_MS);
+}
+
+function setupAutoBackupTriggers(context: vscode.ExtensionContext): void {
+  // Listen for extension changes
+  const extensionChangeListener = vscode.extensions.onDidChange(() => {
+    scheduleAutoBackup();
   });
+
+  // Listen for configuration changes
+  const configChangeListener = vscode.workspace.onDidChangeConfiguration(() => {
+    scheduleAutoBackup();
+  });
+
+  context.subscriptions.push(extensionChangeListener, configChangeListener);
+}
+
+export function activate(context: vscode.ExtensionContext): void {
+  extensionContext = context;
+
+  // Create status bar item
+  statusBarItem = vscode.window.createStatusBarItem(
+    vscode.StatusBarAlignment.Right,
+    100,
+  );
+  statusBarItem.command = "ark.backup";
+  context.subscriptions.push(statusBarItem);
+
+  // Register sidebar webview provider
+  sidebarProvider = new ArkSidebarProvider(context);
+  context.subscriptions.push(
+    vscode.window.registerWebviewViewProvider(
+      ArkSidebarProvider.viewType,
+      sidebarProvider,
+    ),
+  );
+
+  const backupCommand = vscode.commands.registerCommand(
+    "ark.backup",
+    async () => {
+      await handleBackup(context);
+      sidebarProvider.refresh();
+    },
+  );
 
   const restoreCommand = vscode.commands.registerCommand("ark.restore", () => {
     handleRestore(context);
   });
 
-  const setPatCommand = vscode.commands.registerCommand("ark.setPat", () => {
-    handleSetPat(context);
-  });
+  const setPatCommand = vscode.commands.registerCommand(
+    "ark.setPat",
+    async () => {
+      await handleSetPat(context);
+      sidebarProvider.refresh();
+    },
+  );
 
-  context.subscriptions.push(backupCommand, restoreCommand, setPatCommand);
+  const refreshSidebarCommand = vscode.commands.registerCommand(
+    "ark.refreshSidebar",
+    () => {
+      sidebarProvider.refresh();
+    },
+  );
 
+  context.subscriptions.push(
+    backupCommand,
+    restoreCommand,
+    setPatCommand,
+    refreshSidebarCommand,
+  );
+
+  // Setup auto-backup triggers
+  setupAutoBackupTriggers(context);
+
+  // Update status bar on activation
+  updateStatusBar();
+
+  // Check for new machine
   checkForNewMachine(context);
 }
 
 export function deactivate(): void {
-  // Cleanup if needed
+  if (debounceTimer) {
+    clearTimeout(debounceTimer);
+    debounceTimer = undefined;
+  }
 }
