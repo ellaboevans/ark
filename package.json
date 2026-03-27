@@ -47,8 +47,31 @@
       {
         "command": "ark.setPat",
         "title": "Ark: Set GitHub token"
+      },
+      {
+        "command": "ark.refreshSidebar",
+        "title": "Ark: Refresh Sidebar"
       }
-    ]
+    ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "ark-sidebar",
+          "title": "Ark",
+          "icon": "assets/ark-icon.svg"
+        }
+      ]
+    },
+    "views": {
+      "ark-sidebar": [
+        {
+          "type": "webview",
+          "id": "ark.sidebarView",
+          "name": "Backup Status",
+          "icon": "assets/ark-icon.svg"
+        }
+      ]
+    }
   },
   "scripts": {
     "vscode:prepublish": "npm run build",
