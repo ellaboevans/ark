@@ -1,13 +1,13 @@
-name: Publish to Marketplace
+name: Package for Release
 
 on:
   push:
     tags:
-      - 'v[0-9]+.[0-9]+.[0-9]+'  # Publish only on version tags (v1.0.0, v1.0.1, etc.)
+      - 'v[0-9]+.[0-9]+.[0-9]+'  # Package on version tags (v1.0.0, v1.0.1, etc.)
 
 jobs:
-  publish:
-    runs-on: ubuntu-latest  # Publish only on Linux to avoid duplicate releases
+  package:
+    runs-on: ubuntu-latest
 
     steps:
       - uses: actions/checkout@v4
@@ -23,10 +23,7 @@ jobs:
       - name: Build
         run: npm run build
 
-      - name: Publish to Marketplace
-        run: npm exec vsce -- publish -p ${{ secrets.VSCE_PAT }}
-
-      - name: Package for release
+      - name: Package extension
         run: npm exec vsce -- package --out ./ark-${{ github.ref_name }}.vsix
 
       - name: Upload .vsix to Release
