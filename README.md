@@ -40,6 +40,23 @@ Ark puts you back in control. Your backup is always there, private, and just one
 - See extension counts and last backup time
 - One-click actions for backup, restore, and token management
 
+## In Action
+
+### Backup Status Sidebar
+View real-time backup status, extension counts, and manage your backups from the elegant sidebar.
+
+![Ark sidebar](./assets/ark-sidebar.png)
+
+### Selective Restore & Backup History
+Choose exactly which extensions and settings to restore, or browse your entire backup history to restore from any point in time.
+
+![Ark in marketplace](./assets/ark-search-marketplace.png)
+
+### Live Demo
+Watch Ark in action with auto-backups, visual feedback, and one-click restore:
+
+![Ark demo](./assets/ark-gif-demo.gif)
+
 ## Requirements
 
 - **VS Code** 1.80.0 or higher
