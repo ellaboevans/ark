@@ -2,6 +2,13 @@
 
 All notable changes to the Ark extension will be documented in this file.
 
+## [1.2.1] - 2026-03-27
+
+### Added
+
+- Screenshots and demo GIF in README for better marketplace visibility
+- Professional media assets showcasing sidebar, selective restore, and features in action
+
 ## [1.2.0] - 2026-03-27
 
 ### Added
