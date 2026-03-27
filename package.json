@@ -1,5 +1,5 @@
 {
-  "name": "ark",
+  "name": "ark-disaster-recovery",
   "displayName": "Ark - Disaster Recovery for Developers",
   "description": "Backup and restore your VS Code extensions and settings to a private GitHub Gist. Your complete recovery kit for developer environments.",
   "version": "1.0.0",
