@@ -1,13 +1,27 @@
 {
   "name": "ark",
   "displayName": "Ark",
-  "description": "Backup and restore your VS Code extensions and settings to a private GitHub Gist",
+  "description": "Your VS Code recovery kit for extensions and settings backups.",
   "version": "1.0.0",
   "publisher": "ark",
   "license": "MIT",
   "repository": {
     "type": "git",
     "url": "https://github.com/your-username/ark.git"
+  },
+  "keywords": [
+    "backup",
+    "restore",
+    "recovery",
+    "extensions",
+    "settings",
+    "gist",
+    "developer-tools",
+    "disaster-recovery"
+  ],
+  "galleryBanner": {
+    "color": "#0F766E",
+    "theme": "dark"
   },
   "engines": {
     "vscode": "^1.80.0"
@@ -19,6 +33,7 @@
     "onStartupFinished"
   ],
   "main": "./dist/extension.js",
+  "icon": "assets/ark-logo-placeholder.png",
   "contributes": {
     "commands": [
       {
