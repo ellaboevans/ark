@@ -1,7 +1,92 @@
 import * as vscode from "vscode";
 import { execSync } from "node:child_process";
+import * as os from "node:os";
 import { fetchGist } from "./gist";
 import { ExtensionInfo } from "./types/backup-types";
+
+// Platform-specific extension patterns
+const PLATFORM_SPECIFIC_PATTERNS = [
+  "ms-vscode-remote.remote-wsl",
+  "ms-vscode-remote.remote-containers",
+  "ms-vscode-remote.remote-ssh",
+  "ms-vscode.remote-server",
+  "ms-windows-ai-studio",
+  "ms-wsl",
+];
+
+function getCurrentPlatform(): string {
+  const platform = os.platform();
+  switch (platform) {
+    case "darwin":
+      return "macOS";
+    case "win32":
+      return "Windows";
+    case "linux":
+      return "Linux";
+    default:
+      return platform;
+  }
+}
+
+function isPlatformSpecificExtension(extensionId: string): boolean {
+  const lowerId = extensionId.toLowerCase();
+  return PLATFORM_SPECIFIC_PATTERNS.some(
+    (pattern) =>
+      lowerId === pattern.toLowerCase() ||
+      lowerId.includes("remote-wsl") ||
+      lowerId.includes("remote-containers"),
+  );
+}
+
+function getCurrentSettings(): Record<string, unknown> {
+  const settings: Record<string, unknown> = {};
+
+  // Read common setting sections
+  const sections = [
+    "editor",
+    "workbench",
+    "terminal",
+    "files",
+    "search",
+    "debug",
+    "git",
+    "extensions",
+  ];
+
+  for (const section of sections) {
+    const sectionConfig = vscode.workspace.getConfiguration(section);
+    const inspected = sectionConfig.inspect("");
+
+    if (inspected?.globalValue && typeof inspected.globalValue === "object") {
+      settings[section] = inspected.globalValue;
+    }
+  }
+
+  return settings;
+}
+
+function filterPlatformSpecificExtensions(
+  extensions: ExtensionInfo[],
+  backupPlatform: string,
+  currentPlatform: string,
+): { compatible: ExtensionInfo[]; platformSpecific: ExtensionInfo[] } {
+  if (backupPlatform === currentPlatform) {
+    return { compatible: extensions, platformSpecific: [] };
+  }
+
+  const compatible: ExtensionInfo[] = [];
+  const platformSpecific: ExtensionInfo[] = [];
+
+  for (const ext of extensions) {
+    if (isPlatformSpecificExtension(ext.id)) {
+      platformSpecific.push(ext);
+    } else {
+      compatible.push(ext);
+    }
+  }
+
+  return { compatible, platformSpecific };
+}
 
 export async function installExtensions(
   extensions: ExtensionInfo[],
@@ -34,6 +119,90 @@ export async function installExtensions(
   }
 
   return { succeeded, failed };
+}
+
+function diffSettings(
+  current: Record<string, unknown>,
+  backup: Record<string, unknown>,
+): { added: string[]; modified: string[]; unchanged: string[] } {
+  const added: string[] = [];
+  const modified: string[] = [];
+  const unchanged: string[] = [];
+
+  function flattenObject(
+    obj: Record<string, unknown>,
+    prefix = "",
+  ): Record<string, unknown> {
+    const result: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(obj)) {
+      const fullKey = prefix ? `${prefix}.${key}` : key;
+      if (
+        typeof value === "object" &&
+        value !== null &&
+        !Array.isArray(value)
+      ) {
+        Object.assign(
+          result,
+          flattenObject(value as Record<string, unknown>, fullKey),
+        );
+      } else {
+        result[fullKey] = value;
+      }
+    }
+    return result;
+  }
+
+  const flatCurrent = flattenObject(current);
+  const flatBackup = flattenObject(backup);
+
+  for (const key of Object.keys(flatBackup)) {
+    if (!(key in flatCurrent)) {
+      added.push(key);
+    } else if (
+      JSON.stringify(flatCurrent[key]) === JSON.stringify(flatBackup[key])
+    ) {
+      unchanged.push(key);
+    } else {
+      modified.push(key);
+    }
+  }
+
+  return { added, modified, unchanged };
+}
+
+async function confirmSettingsRestore(
+  current: Record<string, unknown>,
+  backup: Record<string, unknown>,
+): Promise<boolean> {
+  const { added, modified } = diffSettings(current, backup);
+
+  if (added.length === 0 && modified.length === 0) {
+    return true; // No changes, proceed silently
+  }
+
+  const totalChanges = added.length + modified.length;
+  const changesSummary: string[] = [];
+
+  if (added.length > 0) {
+    changesSummary.push(`${added.length} new setting(s)`);
+  }
+  if (modified.length > 0) {
+    changesSummary.push(`${modified.length} modified setting(s)`);
+  }
+
+  const detailMessage =
+    totalChanges <= 5
+      ? `Changes: ${[...added, ...modified].join(", ")}`
+      : `${changesSummary.join(" and ")} will be applied.`;
+
+  const choice = await vscode.window.showWarningMessage(
+    `Ark: Restore will change ${totalChanges} setting(s). ${detailMessage}`,
+    { modal: true },
+    "Apply Changes",
+    "Skip Settings",
+  );
+
+  return choice === "Apply Changes";
 }
 
 export async function writeSettings(
@@ -80,6 +249,8 @@ export async function runRestore(
   }
 
   const backup = await fetchGist(pat, gistId);
+  const currentPlatform = getCurrentPlatform();
+  const backupPlatform = backup.machineInfo.os;
 
   await vscode.window.withProgress(
     {
@@ -96,9 +267,28 @@ export async function runRestore(
           .map((ext) => ext.id.toLowerCase()),
       );
 
-      const extensionsToInstall = backup.extensions.filter(
+      let extensionsToInstall = backup.extensions.filter(
         (ext) => !currentExtensions.has(ext.id.toLowerCase()),
       );
+
+      // Check for platform-specific extensions
+      const { compatible, platformSpecific } = filterPlatformSpecificExtensions(
+        extensionsToInstall,
+        backupPlatform,
+        currentPlatform,
+      );
+
+      if (platformSpecific.length > 0) {
+        const skipChoice = await vscode.window.showWarningMessage(
+          `${platformSpecific.length} extension(s) may not work on ${currentPlatform} (backup from ${backupPlatform}): ${platformSpecific.map((e) => e.id).join(", ")}. Skip them?`,
+          "Skip",
+          "Install anyway",
+        );
+
+        if (skipChoice === "Skip") {
+          extensionsToInstall = compatible;
+        }
+      }
 
       if (extensionsToInstall.length > 0) {
         progress.report({
@@ -124,8 +314,21 @@ export async function runRestore(
         progress.report({ message: "All extensions already installed" });
       }
 
-      progress.report({ message: "Restoring settings..." });
-      await writeSettings(backup.settings);
+      progress.report({ message: "Checking settings..." });
+
+      // Get current settings for comparison
+      const currentSettings = getCurrentSettings();
+      const shouldRestoreSettings = await confirmSettingsRestore(
+        currentSettings,
+        backup.settings,
+      );
+
+      if (shouldRestoreSettings) {
+        progress.report({ message: "Restoring settings..." });
+        await writeSettings(backup.settings);
+      } else {
+        progress.report({ message: "Skipping settings restore..." });
+      }
 
       progress.report({ message: "Restore complete!" });
     },
