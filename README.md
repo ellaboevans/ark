@@ -1,6 +1,8 @@
 # Ark
 
-Backup and restore your VS Code extensions and settings to a private GitHub Gist.
+Your VS Code recovery kit.
+
+Ark backs up your VS Code extensions and settings to a private GitHub Gist so you can recover your setup after a wipe, reset, or move to a new machine.
 
 ## Features
 
@@ -8,6 +10,7 @@ Backup and restore your VS Code extensions and settings to a private GitHub Gist
 - **Restore**: Reinstalls extensions and restores settings from your backup on a new machine
 - **Secure**: GitHub Personal Access Token is stored securely using VS Code's SecretStorage API
 - **Privacy**: Automatically strips sensitive settings (tokens, keys, passwords, etc.) from backups
+- **Recovery-first**: Designed around getting your editor environment back quickly when things go wrong
 
 ## Requirements
 
@@ -44,6 +47,15 @@ Backup and restore your VS Code extensions and settings to a private GitHub Gist
 
 When Ark detects fewer than 3 non-built-in extensions installed (indicating a fresh VS Code installation), it will automatically prompt you to restore your previous setup if a backup exists.
 
+## Brand
+
+Ark is positioned as a calm, dependable recovery tool for your editor setup.
+
+- Promise: `Your VS Code recovery kit.`
+- Tone: calm, protective, practical
+- Placeholder logo: [ark-logo-placeholder.svg](/Users/user/Desktop/developer/dev-restore/assets/ark-logo-placeholder.svg)
+- Brand guide: [brand.md](/Users/user/Desktop/developer/dev-restore/docs/brand.md)
+
 ## Privacy & Security
 
 - Your GitHub token is stored securely using VS Code's SecretStorage API (never in settings.json)
@@ -57,6 +69,11 @@ When Ark detects fewer than 3 non-built-in extensions installed (indicating a fr
 
 ```json
 {
+  "_meta": {
+    "generatedBy": "Ark",
+    "builtBy": "Evans Elabo",
+    "tagLine": "Back before you knew it was gone."
+  },
   "id": "uuid-v4",
   "timestamp": "2026-03-27T10:00:00Z",
   "extensions": [{ "id": "esbenp.prettier-vscode", "version": "10.1.0" }],
