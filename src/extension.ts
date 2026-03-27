@@ -1,6 +1,12 @@
 import * as vscode from "vscode";
 import { createBackupData, countNonBuiltInExtensions } from "./backup";
-import { createGist, updateGist, verifyPat } from "./gist";
+import {
+  createGist,
+  updateGist,
+  verifyPat,
+  updateBackupHistory,
+  fetchBackupHistory,
+} from "./gist";
 import { runRestore } from "./restore";
 import { ArkSidebarProvider } from "./sidebar";
 import {
@@ -111,6 +117,8 @@ async function handleBackup(context: vscode.ExtensionContext): Promise<void> {
           progress.report({ message: "Updating existing backup..." });
           try {
             await updateGist(pat, existingGistId, backup);
+            progress.report({ message: "Updating backup history..." });
+            await updateBackupHistory(pat, existingGistId, backup);
           } catch (error) {
             if (error instanceof Error && error.message.includes("404")) {
               vscode.window.showWarningMessage(
@@ -125,11 +133,15 @@ async function handleBackup(context: vscode.ExtensionContext): Promise<void> {
             });
             const newGistId = await createGist(pat, backup);
             await context.globalState.update(GIST_ID_KEY, newGistId);
+            progress.report({ message: "Updating backup history..." });
+            await updateBackupHistory(pat, newGistId, backup);
           }
         } else {
           progress.report({ message: "Creating new backup..." });
           const gistId = await createGist(pat, backup);
           await context.globalState.update(GIST_ID_KEY, gistId);
+          progress.report({ message: "Updating backup history..." });
+          await updateBackupHistory(pat, gistId, backup);
         }
 
         progress.report({ message: "Backup complete!" });
@@ -177,6 +189,79 @@ async function handleSetPat(context: vscode.ExtensionContext): Promise<void> {
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error);
     vscode.window.showErrorMessage(`Ark: Failed to set token. ${errorMessage}`);
+  }
+}
+
+async function handleRestoreFromHistory(
+  context: vscode.ExtensionContext,
+  backupId: string,
+): Promise<void> {
+  try {
+    const pat = await ensurePat(context);
+    if (!pat) {
+      vscode.window.showWarningMessage(
+        "Ark: Restore cancelled. GitHub token is required.",
+      );
+      return;
+    }
+
+    await runRestore(context, pat, backupId);
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    vscode.window.showErrorMessage(`Ark: Restore failed. ${errorMessage}`);
+  }
+}
+
+async function handleViewBackupHistory(
+  context: vscode.ExtensionContext,
+): Promise<void> {
+  try {
+    const pat = await ensurePat(context);
+    if (!pat) {
+      vscode.window.showWarningMessage("Ark: GitHub token is required.");
+      return;
+    }
+
+    const gistId = context.globalState.get<string>(GIST_ID_KEY);
+    if (!gistId) {
+      vscode.window.showInformationMessage(
+        "Ark: No backups found. Create a backup first.",
+      );
+      return;
+    }
+
+    const history = await fetchBackupHistory(pat, gistId);
+
+    if (history.backups.length === 0) {
+      vscode.window.showInformationMessage("Ark: No backup history found.");
+      return;
+    }
+
+    // Reverse to show newest first
+    const backups = [...history.backups].reverse();
+
+    const quickPickItems = backups.map((entry) => {
+      const date = new Date(entry.timestamp).toLocaleString();
+      return {
+        label: `📅 ${date}`,
+        description: `${entry.extensionCount} extensions, ${entry.settingsCount} settings (${entry.machineInfo.os})`,
+        backupId: entry.id,
+      };
+    });
+
+    const selected = await vscode.window.showQuickPick(quickPickItems, {
+      title: "Select Backup to Restore",
+      placeHolder: "Choose a backup version",
+    });
+
+    if (selected && "backupId" in selected) {
+      await handleRestoreFromHistory(context, selected.backupId);
+    }
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    vscode.window.showErrorMessage(
+      `Ark: Failed to view history. ${errorMessage}`,
+    );
   }
 }
 
@@ -247,10 +332,12 @@ async function performSilentBackup(): Promise<void> {
     if (existingGistId) {
       try {
         await updateGist(pat, existingGistId, backup);
+        await updateBackupHistory(pat, existingGistId, backup);
       } catch (error) {
         if (error instanceof Error && error.message.includes("404")) {
           const newGistId = await createGist(pat, backup);
           await extensionContext.globalState.update(GIST_ID_KEY, newGistId);
+          await updateBackupHistory(pat, newGistId, backup);
         } else {
           throw error;
         }
@@ -258,6 +345,7 @@ async function performSilentBackup(): Promise<void> {
     } else {
       const gistId = await createGist(pat, backup);
       await extensionContext.globalState.update(GIST_ID_KEY, gistId);
+      await updateBackupHistory(pat, gistId, backup);
     }
 
     await extensionContext.globalState.update(LAST_BACKUP_KEY, Date.now());
@@ -342,11 +430,28 @@ export function activate(context: vscode.ExtensionContext): void {
     },
   );
 
+  const restoreFromHistoryCommand = vscode.commands.registerCommand(
+    "ark.restoreFromHistory",
+    async (backupId: string) => {
+      await handleRestoreFromHistory(context, backupId);
+      sidebarProvider.refresh();
+    },
+  );
+
+  const viewHistoryCommand = vscode.commands.registerCommand(
+    "ark.viewHistory",
+    async () => {
+      await handleViewBackupHistory(context);
+    },
+  );
+
   context.subscriptions.push(
     backupCommand,
     restoreCommand,
     setPatCommand,
     refreshSidebarCommand,
+    restoreFromHistoryCommand,
+    viewHistoryCommand,
   );
 
   // Setup auto-backup triggers

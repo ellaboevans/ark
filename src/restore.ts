@@ -1,7 +1,7 @@
 import * as vscode from "vscode";
 import { execSync } from "node:child_process";
 import * as os from "node:os";
-import { fetchGist } from "./gist";
+import { fetchGist, getBackupFromHistory } from "./gist";
 import { ExtensionInfo } from "./types/backup-types";
 
 // Platform-specific extension patterns
@@ -205,12 +205,72 @@ async function confirmSettingsRestore(
   return choice === "Apply Changes";
 }
 
+interface SelectiveRestoreOptions {
+  extensions: string[];
+  settingsCategories: string[];
+}
+
+async function showSelectiveRestoreDialog(
+  extensions: ExtensionInfo[],
+  settingsObject: Record<string, unknown>,
+): Promise<SelectiveRestoreOptions> {
+  // Create quick pick items for extensions
+  const extensionItems = extensions.map((ext) => ({
+    label: ext.id,
+    picked: true,
+    description: `v${ext.version}`,
+  }));
+
+  // Get settings categories
+  const settingsCategories = Object.keys(settingsObject);
+  const settingsItems = settingsCategories.map((category) => ({
+    label: category,
+    picked: true,
+    description: "Settings category",
+  }));
+
+  // Show extension selector
+  const selectedExtensions = await vscode.window.showQuickPick(extensionItems, {
+    canPickMany: true,
+    title: "Select Extensions to Restore",
+    placeHolder:
+      "Check extensions you want to restore (all checked by default)",
+  });
+
+  // Show settings selector
+  const selectedSettings = await vscode.window.showQuickPick(settingsItems, {
+    canPickMany: true,
+    title: "Select Settings to Restore",
+    placeHolder:
+      "Check settings categories you want to restore (all checked by default)",
+  });
+
+  return {
+    extensions: selectedExtensions
+      ? selectedExtensions.map((item) => item.label)
+      : [],
+    settingsCategories: selectedSettings
+      ? selectedSettings.map((item) => item.label)
+      : [],
+  };
+}
+
 export async function writeSettings(
   settings: Record<string, unknown>,
+  selectedCategories?: string[],
 ): Promise<void> {
   const config = vscode.workspace.getConfiguration();
 
-  for (const [section, value] of Object.entries(settings)) {
+  // If specific categories selected, filter to only those
+  const categoriesToRestore = selectedCategories
+    ? Object.fromEntries(
+        Object.entries(settings).filter(([section]) =>
+          selectedCategories.includes(section),
+        ),
+      )
+    : settings;
+
+  for (const [section, value] of Object.entries(categoriesToRestore)) {
     if (typeof value === "object" && value !== null && !Array.isArray(value)) {
       for (const [key, subValue] of Object.entries(
         value as Record<string, unknown>,
@@ -239,6 +299,7 @@ export async function writeSettings(
 export async function runRestore(
   context: vscode.ExtensionContext,
   pat: string,
+  backupId?: string,
 ): Promise<void> {
   const gistId = context.globalState.get<string>("ark.gistId");
 
@@ -248,9 +309,31 @@ export async function runRestore(
     );
   }
 
-  const backup = await fetchGist(pat, gistId);
+  // Fetch backup data - either from history (if backupId provided) or latest
+  let backup;
+  if (backupId) {
+    backup = await getBackupFromHistory(pat, gistId, backupId);
+  } else {
+    backup = await fetchGist(pat, gistId);
+  }
+
   const currentPlatform = getCurrentPlatform();
   const backupPlatform = backup.machineInfo.os;
+
+  // Show selective restore dialog
+  const selectiveRestore = await showSelectiveRestoreDialog(
+    backup.extensions,
+    backup.settings,
+  );
+
+  // If user cancelled selection, abort
+  if (
+    selectiveRestore.extensions.length === 0 &&
+    selectiveRestore.settingsCategories.length === 0
+  ) {
+    vscode.window.showInformationMessage("Ark: Restore cancelled");
+    return;
+  }
 
   await vscode.window.withProgress(
     {
@@ -267,9 +350,10 @@ export async function runRestore(
           .map((ext) => ext.id.toLowerCase()),
       );
 
-      let extensionsToInstall = backup.extensions.filter(
-        (ext) => !currentExtensions.has(ext.id.toLowerCase()),
-      );
+      // Filter to only selected extensions that aren't already installed
+      let extensionsToInstall = backup.extensions
+        .filter((ext) => selectiveRestore.extensions.includes(ext.id))
+        .filter((ext) => !currentExtensions.has(ext.id.toLowerCase()));
 
       // Check for platform-specific extensions
       const { compatible, platformSpecific } = filterPlatformSpecificExtensions(
@@ -311,21 +395,34 @@ export async function runRestore(
           );
         }
       } else {
-        progress.report({ message: "All extensions already installed" });
+        progress.report({
+          message: "All selected extensions already installed",
+        });
       }
 
       progress.report({ message: "Checking settings..." });
 
       // Get current settings for comparison
       const currentSettings = getCurrentSettings();
-      const shouldRestoreSettings = await confirmSettingsRestore(
-        currentSettings,
-        backup.settings,
+
+      // Filter backup settings to only selected categories
+      const selectedBackupSettings = Object.fromEntries(
+        Object.entries(backup.settings).filter(([category]) =>
+          selectiveRestore.settingsCategories.includes(category),
+        ),
       );
 
-      if (shouldRestoreSettings) {
+      const shouldRestoreSettings = await confirmSettingsRestore(
+        currentSettings,
+        selectedBackupSettings,
+      );
+
+      if (
+        shouldRestoreSettings &&
+        selectiveRestore.settingsCategories.length > 0
+      ) {
         progress.report({ message: "Restoring settings..." });
-        await writeSettings(backup.settings);
+        await writeSettings(selectedBackupSettings);
       } else {
         progress.report({ message: "Skipping settings restore..." });
       }

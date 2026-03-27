@@ -22,3 +22,16 @@ export interface BackupData {
   settings: Record<string, unknown>;
   machineInfo: MachineInfo;
 }
+
+export interface BackupHistoryEntry {
+  id: string;
+  timestamp: string;
+  extensionCount: number;
+  settingsCount: number;
+  machineInfo: MachineInfo;
+  backup: BackupData;
+}
+
+export interface BackupHistory {
+  backups: BackupHistoryEntry[];
+}

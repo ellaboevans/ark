@@ -1,5 +1,13 @@
-import { GIST_FILENAME, GITHUB_API_BASE } from "./constants/gist";
-import { BackupData } from "./types/backup-types";
+import {
+  GIST_FILENAME,
+  GITHUB_API_BASE,
+  HISTORY_FILENAME,
+} from "./constants/gist";
+import {
+  BackupData,
+  BackupHistory,
+  BackupHistoryEntry,
+} from "./types/backup-types";
 import {
   GistCreatePayload,
   GistResponse,
@@ -143,4 +151,87 @@ export async function verifyPat(
     const message = error instanceof Error ? error.message : String(error);
     return { valid: false, error: `Network error: ${message}` };
   }
+}
+
+export async function updateBackupHistory(
+  pat: string,
+  gistId: string,
+  newBackup: BackupData,
+): Promise<void> {
+  // Try to fetch existing history
+  let history: BackupHistory = { backups: [] };
+
+  try {
+    history = await fetchBackupHistory(pat, gistId);
+  } catch {
+    // History file doesn't exist yet, start fresh
+    history = { backups: [] };
+  }
+
+  // Create new history entry
+  const entry: BackupHistoryEntry = {
+    id: newBackup.id,
+    timestamp: newBackup.timestamp,
+    extensionCount: newBackup.extensions.length,
+    settingsCount: Object.keys(newBackup.settings).length,
+    machineInfo: newBackup.machineInfo,
+    backup: newBackup,
+  };
+
+  // Add new entry to history
+  history.backups.push(entry);
+
+  // Update gist with new history
+  const payload: GistUpdatePayload = {
+    description: "Ark VS Code backup",
+    files: {
+      [HISTORY_FILENAME]: {
+        content: JSON.stringify(history, null, 2),
+      },
+    },
+  };
+
+  await makeGitHubRequest<GistResponse>(
+    `${GITHUB_API_BASE}/gists/${gistId}`,
+    pat,
+    {
+      method: "PATCH",
+      body: JSON.stringify(payload),
+    },
+  );
+}
+
+export async function fetchBackupHistory(
+  pat: string,
+  gistId: string,
+): Promise<BackupHistory> {
+  const response = await makeGitHubRequest<GistResponse>(
+    `${GITHUB_API_BASE}/gists/${gistId}`,
+    pat,
+    {
+      method: "GET",
+    },
+  );
+
+  const file = response.files[HISTORY_FILENAME];
+  if (!file?.content) {
+    throw new Error(`Gist does not contain ${HISTORY_FILENAME}`);
+  }
+
+  return JSON.parse(file.content) as BackupHistory;
+}
+
+export async function getBackupFromHistory(
+  pat: string,
+  gistId: string,
+  backupId: string,
+): Promise<BackupData> {
+  const history = await fetchBackupHistory(pat, gistId);
+  const entry = history.backups.find((b) => b.id === backupId);
+
+  if (!entry) {
+    throw new Error(`Backup with id ${backupId} not found in history`);
+  }
+
+  return entry.backup;
 }
