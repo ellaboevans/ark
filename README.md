@@ -34,8 +34,8 @@ Backup and restore your VS Code extensions and settings to a private GitHub Gist
 
 ## Commands
 
-| Command                           | Description                                      |
-| --------------------------------- | ------------------------------------------------ |
+| Command                    | Description                                      |
+| -------------------------- | ------------------------------------------------ |
 | `Ark: Backup now`          | Create or update your backup                     |
 | `Ark: Restore from backup` | Restore extensions and settings from your backup |
 | `Ark: Set GitHub token`    | Set or update your GitHub Personal Access Token  |

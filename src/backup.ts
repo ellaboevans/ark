@@ -151,7 +151,7 @@ export function createBackupData(): BackupData {
     _meta: {
       generatedBy: "Ark",
       builtBy: "Evans Elabo",
-      tagLine: "Duh Duh",
+      tagLine: "Back before you knew it was gone.",
     },
     id: generateUUID(),
     timestamp: new Date().toISOString(),
