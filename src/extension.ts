@@ -7,7 +7,7 @@ import {
   updateBackupHistory,
   fetchBackupHistory,
 } from "./gist";
-import { runRestore } from "./restore";
+import { runRecoverMissingExtensions, runRestore } from "./restore";
 import { ArkSidebarProvider } from "./sidebar";
 import {
   PAT_SECRET_KEY,
@@ -211,6 +211,25 @@ async function handleRestoreFromHistory(
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : String(error);
     vscode.window.showErrorMessage(`Ark: Restore failed. ${errorMessage}`);
+  }
+}
+
+async function handleRecoverMissingExtensions(
+  context: vscode.ExtensionContext,
+): Promise<void> {
+  try {
+    const pat = await ensurePat(context);
+    if (!pat) {
+      vscode.window.showWarningMessage(
+        "Ark: Recovery cancelled. GitHub token is required.",
+      );
+      return;
+    }
+
+    await runRecoverMissingExtensions(context, pat);
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    vscode.window.showErrorMessage(`Ark: Recovery failed. ${errorMessage}`);
   }
 }
 
@@ -468,6 +487,14 @@ export function activate(context: vscode.ExtensionContext): void {
     },
   );
 
+  const recoverMissingExtensionsCommand = vscode.commands.registerCommand(
+    "ark.recoverMissingExtensions",
+    async () => {
+      await handleRecoverMissingExtensions(context);
+      sidebarProvider.refresh();
+    },
+  );
+
   context.subscriptions.push(
     backupCommand,
     restoreCommand,
@@ -475,6 +502,7 @@ export function activate(context: vscode.ExtensionContext): void {
     refreshSidebarCommand,
     restoreFromHistoryCommand,
     viewHistoryCommand,
+    recoverMissingExtensionsCommand,
   );
 
   // Setup auto-backup triggers
@@ -492,4 +520,7 @@ export function deactivate(): void {
     clearTimeout(debounceTimer);
     debounceTimer = undefined;
   }
+}
+function clearTimeout(debounceTimer: any) {
+  throw new Error("Function not implemented.");
 }
