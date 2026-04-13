@@ -4,6 +4,7 @@ import {
   SENSITIVE_KEYS_PATTERNS,
   SETTINGS_TO_CAPTURE,
 } from "./constants/backup";
+import { getExtensionPlatformTag } from "./platform";
 
 function isSensitiveKey(key: string): boolean {
   const lowerKey = key.toLowerCase();
@@ -48,6 +49,7 @@ export function readExtensions(): ExtensionInfo[] {
   return nonBuiltIn.map((ext) => ({
     id: ext.id,
     version: ext.packageJSON.version || "unknown",
+    platformTag: getExtensionPlatformTag(ext.id),
   }));
 }
 

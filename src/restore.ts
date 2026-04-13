@@ -1,42 +1,12 @@
 import * as vscode from "vscode";
 import { execSync } from "node:child_process";
-import * as os from "node:os";
 import { fetchBackupHistory, fetchGist, getBackupFromHistory } from "./gist";
-import { BackupHistoryEntry, ExtensionInfo } from "./types/backup-types";
-
-// Platform-specific extension patterns
-const PLATFORM_SPECIFIC_PATTERNS = [
-  "ms-vscode-remote.remote-wsl",
-  "ms-vscode-remote.remote-containers",
-  "ms-vscode-remote.remote-ssh",
-  "ms-vscode.remote-server",
-  "ms-windows-ai-studio",
-  "ms-wsl",
-];
-
-function getCurrentPlatform(): string {
-  const platform = os.platform();
-  switch (platform) {
-    case "darwin":
-      return "macOS";
-    case "win32":
-      return "Windows";
-    case "linux":
-      return "Linux";
-    default:
-      return platform;
-  }
-}
-
-function isPlatformSpecificExtension(extensionId: string): boolean {
-  const lowerId = extensionId.toLowerCase();
-  return PLATFORM_SPECIFIC_PATTERNS.some(
-    (pattern) =>
-      lowerId === pattern.toLowerCase() ||
-      lowerId.includes("remote-wsl") ||
-      lowerId.includes("remote-containers"),
-  );
-}
+import {
+  BackupHistoryEntry,
+  ExtensionInfo,
+  ExtensionPlatformTag,
+} from "./types/backup-types";
+import { getCurrentPlatform, getExtensionPlatformTag } from "./platform";
 
 function getCurrentSettings(): Record<string, unknown> {
   const settings: Record<string, unknown> = {};
@@ -78,7 +48,7 @@ function filterPlatformSpecificExtensions(
   const platformSpecific: ExtensionInfo[] = [];
 
   for (const ext of extensions) {
-    if (isPlatformSpecificExtension(ext.id)) {
+    if (getStoredOrDerivedPlatformTag(ext) === "platform-specific") {
       platformSpecific.push(ext);
     } else {
       compatible.push(ext);
@@ -86,6 +56,30 @@ function filterPlatformSpecificExtensions(
   }
 
   return { compatible, platformSpecific };
+}
+
+function getStoredOrDerivedPlatformTag(
+  extension: ExtensionInfo,
+): ExtensionPlatformTag {
+  return extension.platformTag || getExtensionPlatformTag(extension.id);
+}
+
+function getPlatformTagDescription(
+  extension: ExtensionInfo,
+  backupPlatform: string,
+  currentPlatform: string,
+): string {
+  const platformTag = getStoredOrDerivedPlatformTag(extension);
+
+  if (platformTag === "platform-specific") {
+    if (backupPlatform === currentPlatform) {
+      return `Platform-specific for ${backupPlatform}`;
+    }
+
+    return `Platform-specific from ${backupPlatform}`;
+  }
+
+  return "Cross-platform";
 }
 
 export async function installExtensions(
@@ -213,12 +207,15 @@ interface SelectiveRestoreOptions {
 async function showSelectiveRestoreDialog(
   extensions: ExtensionInfo[],
   settingsObject: Record<string, unknown>,
+  backupPlatform: string,
+  currentPlatform: string,
 ): Promise<SelectiveRestoreOptions> {
   // Create quick pick items for extensions
   const extensionItems = extensions.map((ext) => ({
     label: ext.id,
     picked: true,
     description: `v${ext.version}`,
+    detail: getPlatformTagDescription(ext, backupPlatform, currentPlatform),
   }));
 
   // Get settings categories
@@ -324,6 +321,8 @@ export async function runRestore(
   const selectiveRestore = await showSelectiveRestoreDialog(
     backup.extensions,
     backup.settings,
+    backupPlatform,
+    currentPlatform,
   );
 
   // If user cancelled selection, abort
@@ -446,6 +445,7 @@ export async function runRestore(
 interface MissingExtensionCandidate {
   extension: ExtensionInfo;
   lastSeenAt: string;
+  lastSeenOn: string;
 }
 
 function findMissingExtensionsFromHistory(
@@ -470,6 +470,7 @@ function findMissingExtensionsFromHistory(
       missingById.set(extensionId, {
         extension,
         lastSeenAt: entry.timestamp,
+        lastSeenOn: entry.machineInfo.os,
       });
     }
   }
@@ -491,6 +492,7 @@ export async function runRecoverMissingExtensions(
 
   const history = await fetchBackupHistory(pat, gistId);
   const missingExtensions = findMissingExtensionsFromHistory(history.backups);
+  const currentPlatform = getCurrentPlatform();
 
   if (missingExtensions.length === 0) {
     vscode.window.showInformationMessage(
@@ -504,7 +506,7 @@ export async function runRecoverMissingExtensions(
       label: candidate.extension.id,
       picked: true,
       description: `v${candidate.extension.version}`,
-      detail: `Last seen in backup on ${new Date(candidate.lastSeenAt).toLocaleString()}`,
+      detail: `${getPlatformTagDescription(candidate.extension, candidate.lastSeenOn, currentPlatform)} • last seen ${new Date(candidate.lastSeenAt).toLocaleString()}`,
     })),
     {
       canPickMany: true,
@@ -520,9 +522,41 @@ export async function runRecoverMissingExtensions(
   }
 
   const selectedIds = new Set(selected.map((item) => item.label));
-  const extensionsToInstall = missingExtensions
+  let extensionsToInstall = missingExtensions
     .filter((candidate) => selectedIds.has(candidate.extension.id))
     .map((candidate) => candidate.extension);
+
+  const platformSpecificSelections = missingExtensions.filter(
+    (candidate) =>
+      selectedIds.has(candidate.extension.id) &&
+      getStoredOrDerivedPlatformTag(candidate.extension) ===
+        "platform-specific" &&
+      candidate.lastSeenOn !== currentPlatform,
+  );
+
+  if (platformSpecificSelections.length > 0) {
+    const skipChoice = await vscode.window.showWarningMessage(
+      `${platformSpecificSelections.length} selected extension(s) were tagged as platform-specific on another OS: ${platformSpecificSelections.map((entry) => entry.extension.id).join(", ")}. Skip them?`,
+      "Skip",
+      "Install anyway",
+    );
+
+    if (skipChoice === "Skip") {
+      const skipped = new Set(
+        platformSpecificSelections.map((entry) => entry.extension.id),
+      );
+      extensionsToInstall = extensionsToInstall.filter(
+        (extension) => !skipped.has(extension.id),
+      );
+    }
+  }
+
+  if (extensionsToInstall.length === 0) {
+    vscode.window.showInformationMessage(
+      "Ark: No compatible missing extensions selected for recovery.",
+    );
+    return;
+  }
 
   await vscode.window.withProgress(
     {

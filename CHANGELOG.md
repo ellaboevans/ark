@@ -2,6 +2,20 @@
 
 All notable changes to the Ark extension will be documented in this file.
 
+## [1.3.0] - 2026-04-13
+
+### Added
+
+- **Cross-platform extension tagging** in backups so each saved extension is explicitly marked as `cross-platform` or `platform-specific`
+- **Missing extension recovery** flow that scans backup history and lets users reinstall only extensions that disappeared unexpectedly
+- Platform tag details in restore and recovery pickers so users can make safer choices when restoring across macOS, Windows, and Linux
+
+### Improved
+
+- Restore now uses stored extension tags, while remaining backward-compatible with older backups that do not have tags yet
+- TypeScript configuration updated for modern Node 16 module resolution and explicit VS Code/Node ambient types
+- Cross-OS restore flow is more intentional, with clearer warnings before reinstalling extensions tagged for another platform
+
 ## [1.2.1] - 2026-03-27
 
 ### Added

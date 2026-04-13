@@ -1,6 +1,9 @@
+export type ExtensionPlatformTag = "cross-platform" | "platform-specific";
+
 export interface ExtensionInfo {
   id: string;
   version: string;
+  platformTag?: ExtensionPlatformTag;
 }
 
 export interface MachineInfo {
