@@ -1,8 +1,8 @@
 import * as vscode from "vscode";
 import { execSync } from "node:child_process";
 import * as os from "node:os";
-import { fetchGist, getBackupFromHistory } from "./gist";
-import { ExtensionInfo } from "./types/backup-types";
+import { fetchBackupHistory, fetchGist, getBackupFromHistory } from "./gist";
+import { BackupHistoryEntry, ExtensionInfo } from "./types/backup-types";
 
 // Platform-specific extension patterns
 const PLATFORM_SPECIFIC_PATTERNS = [
@@ -441,4 +441,112 @@ export async function runRestore(
   if (reloadChoice === "Reload Now") {
     await vscode.commands.executeCommand("workbench.action.reloadWindow");
   }
+}
+
+interface MissingExtensionCandidate {
+  extension: ExtensionInfo;
+  lastSeenAt: string;
+}
+
+function findMissingExtensionsFromHistory(
+  history: BackupHistoryEntry[],
+): MissingExtensionCandidate[] {
+  const currentExtensions = new Set(
+    vscode.extensions.all
+      .filter((ext) => !ext.packageJSON.isBuiltin)
+      .map((ext) => ext.id.toLowerCase()),
+  );
+
+  const missingById = new Map<string, MissingExtensionCandidate>();
+
+  for (const entry of [...history].reverse()) {
+    for (const extension of entry.backup.extensions) {
+      const extensionId = extension.id.toLowerCase();
+
+      if (currentExtensions.has(extensionId) || missingById.has(extensionId)) {
+        continue;
+      }
+
+      missingById.set(extensionId, {
+        extension,
+        lastSeenAt: entry.timestamp,
+      });
+    }
+  }
+
+  return [...missingById.values()].sort((a, b) =>
+    a.extension.id.localeCompare(b.extension.id),
+  );
+}
+
+export async function runRecoverMissingExtensions(
+  context: vscode.ExtensionContext,
+  pat: string,
+): Promise<void> {
+  const gistId = context.globalState.get<string>("ark.gistId");
+
+  if (!gistId) {
+    throw new Error("No backup history found. Create a backup first.");
+  }
+
+  const history = await fetchBackupHistory(pat, gistId);
+  const missingExtensions = findMissingExtensionsFromHistory(history.backups);
+
+  if (missingExtensions.length === 0) {
+    vscode.window.showInformationMessage(
+      "Ark: No missing extensions found in your backup history.",
+    );
+    return;
+  }
+
+  const selected = await vscode.window.showQuickPick(
+    missingExtensions.map((candidate) => ({
+      label: candidate.extension.id,
+      picked: true,
+      description: `v${candidate.extension.version}`,
+      detail: `Last seen in backup on ${new Date(candidate.lastSeenAt).toLocaleString()}`,
+    })),
+    {
+      canPickMany: true,
+      title: "Recover Missing Extensions",
+      placeHolder:
+        "Select missing extensions to reinstall from your backup history",
+    },
+  );
+
+  if (!selected || selected.length === 0) {
+    vscode.window.showInformationMessage("Ark: Recovery cancelled");
+    return;
+  }
+
+  const selectedIds = new Set(selected.map((item) => item.label));
+  const extensionsToInstall = missingExtensions
+    .filter((candidate) => selectedIds.has(candidate.extension.id))
+    .map((candidate) => candidate.extension);
+
+  await vscode.window.withProgress(
+    {
+      location: vscode.ProgressLocation.Notification,
+      title: "Ark: Recovering missing extensions",
+      cancellable: false,
+    },
+    async (progress) => {
+      const { succeeded, failed } = await installExtensions(
+        extensionsToInstall,
+        progress,
+      );
+
+      if (failed.length > 0) {
+        vscode.window.showWarningMessage(
+          `Ark: ${failed.length} extension(s) failed to install: ${failed.join(", ")}`,
+        );
+      }
+
+      if (succeeded.length > 0) {
+        vscode.window.showInformationMessage(
+          `Ark: Recovered ${succeeded.length} missing extension(s).`,
+        );
+      }
+    },
+  );
 }
