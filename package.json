@@ -76,6 +76,11 @@
         "command": "ark.viewHistory",
         "title": "Ark: View backup history",
         "category": "Ark"
+      },
+      {
+        "command": "ark.recoverMissingExtensions",
+        "title": "Ark: Recover missing extensions from history",
+        "category": "Ark"
       }
     ],
     "viewsContainers": {
