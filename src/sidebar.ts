@@ -31,6 +31,9 @@ export class ArkSidebarProvider implements vscode.WebviewViewProvider {
         case "restore":
           await vscode.commands.executeCommand("ark.restore");
           break;
+        case "recoverMissing":
+          await vscode.commands.executeCommand("ark.recoverMissingExtensions");
+          break;
         case "setToken":
           await vscode.commands.executeCommand("ark.setPat");
           this.refresh();
@@ -197,6 +200,9 @@ export class ArkSidebarProvider implements vscode.WebviewViewProvider {
     <button class="btn-secondary" onclick="restore()" ${gistId ? "" : "disabled"}>
       Restore from Backup
     </button>
+    <button class="btn-secondary" onclick="recoverMissing()" ${gistId ? "" : "disabled"}>
+      Recover Missing Extensions
+    </button>
     <button class="btn-link" onclick="setToken()">
       ${gistId ? "Update" : "Set"} GitHub Token
     </button>
@@ -211,6 +217,10 @@ export class ArkSidebarProvider implements vscode.WebviewViewProvider {
     
     function restore() {
       vscode.postMessage({ command: 'restore' });
+    }
+
+    function recoverMissing() {
+      vscode.postMessage({ command: 'recoverMissing' });
     }
     
     function setToken() {
