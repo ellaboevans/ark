@@ -6,6 +6,7 @@ import {
   verifyPat,
   updateBackupHistory,
   fetchBackupHistory,
+  fetchGist,
 } from "./gist";
 import { runRecoverMissingExtensions, runRestore } from "./restore";
 import { ArkSidebarProvider } from "./sidebar";
@@ -495,6 +496,56 @@ export function activate(context: vscode.ExtensionContext): void {
     },
   );
 
+  const setGistIdCommand = vscode.commands.registerCommand(
+    "ark.setGistId",
+    async () => {
+      try {
+        const pat = await ensurePat(context);
+        if (!pat) {
+          vscode.window.showWarningMessage(
+            "Ark: Setting Gist ID cancelled. GitHub token is required.",
+          );
+          return;
+        }
+
+        const gistId = await vscode.window.showInputBox({
+          prompt: "Paste the Gist ID (from the Gist URL)",
+          placeHolder: "e.g. 1a2b3c4d5e6f7g8h9i",
+          ignoreFocusOut: true,
+          validateInput: (v) =>
+            v && v.trim().length ? null : "Gist ID required",
+        });
+
+        if (!gistId) {
+          return;
+        }
+
+        const trimmed = gistId.trim();
+
+        // Verify the gist contains the expected backup file
+        try {
+          await fetchGist(pat, trimmed);
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          vscode.window.showErrorMessage(
+            `Ark: Unable to verify Gist ID: ${msg}`,
+          );
+          return;
+        }
+
+        await context.globalState.update(GIST_ID_KEY, trimmed);
+        vscode.window.showInformationMessage("Ark: Gist ID saved.");
+        sidebarProvider.refresh();
+      } catch (error) {
+        const errorMessage =
+          error instanceof Error ? error.message : String(error);
+        vscode.window.showErrorMessage(
+          `Ark: Failed to set Gist ID. ${errorMessage}`,
+        );
+      }
+    },
+  );
+
   context.subscriptions.push(
     backupCommand,
     restoreCommand,
@@ -520,7 +571,4 @@ export function deactivate(): void {
     clearTimeout(debounceTimer);
     debounceTimer = undefined;
   }
-}
-function clearTimeout(debounceTimer: any) {
-  throw new Error("Function not implemented.");
 }

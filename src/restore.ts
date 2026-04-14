@@ -1,6 +1,7 @@
 import * as vscode from "vscode";
 import { execSync } from "node:child_process";
 import { fetchBackupHistory, fetchGist, getBackupFromHistory } from "./gist";
+import { GIST_ID_KEY } from "./constants/extension";
 import {
   BackupHistoryEntry,
   ExtensionInfo,
@@ -298,20 +299,82 @@ export async function runRestore(
   pat: string,
   backupId?: string,
 ): Promise<void> {
-  const gistId = context.globalState.get<string>("ark.gistId");
+  let gistId = context.globalState.get<string>(GIST_ID_KEY);
 
+  // If we don't have a stored gist id, let the user provide one or select a local backup file
+  let backup;
   if (!gistId) {
-    throw new Error(
-      "No backup found. Please run a backup first or ensure you have the correct GitHub token.",
+    const choice = await vscode.window.showQuickPick(
+      [
+        {
+          label: "Select local backup file",
+          description: "Choose a .json backup from disk",
+        },
+        {
+          label: "Paste Gist ID",
+          description:
+            "Provide an existing Gist ID to fetch backup from GitHub",
+        },
+        { label: "Cancel", description: "Abort restore" },
+      ],
+      {
+        title: "No Ark backup found in extension state",
+        placeHolder: "Choose how to provide a backup",
+      },
     );
+
+    if (!choice || choice.label === "Cancel") {
+      throw new Error("Restore cancelled by user");
+    }
+
+    if (choice.label === "Select local backup file") {
+      const uris = await vscode.window.showOpenDialog({
+        canSelectMany: false,
+        openLabel: "Open backup file",
+        filters: { JSON: ["json"] },
+      });
+
+      if (!uris || uris.length === 0) {
+        throw new Error("No backup file selected");
+      }
+
+      try {
+        const bytes = await vscode.workspace.fs.readFile(uris[0]);
+        const content = Buffer.from(bytes).toString("utf8");
+        backup = JSON.parse(content);
+      } catch (err) {
+        throw new Error("Failed to read or parse selected backup file");
+      }
+    } else if (choice.label === "Paste Gist ID") {
+      const input = await vscode.window.showInputBox({
+        prompt: "Paste the Gist ID (the alphanumeric id shown in the Gist URL)",
+        ignoreFocusOut: true,
+      });
+
+      if (!input) {
+        throw new Error("No Gist ID provided");
+      }
+
+      gistId = input.trim();
+      // Persist the provided gist id so future restores are easier
+      await context.globalState.update(GIST_ID_KEY, gistId);
+    }
   }
 
-  // Fetch backup data - either from history (if backupId provided) or latest
-  let backup;
-  if (backupId) {
-    backup = await getBackupFromHistory(pat, gistId, backupId);
-  } else {
-    backup = await fetchGist(pat, gistId);
+  // If we still don't have backup (i.e., gistId was provided or persisted), fetch from GitHub
+  if (!backup) {
+    if (!gistId) {
+      throw new Error(
+        "No backup source available. Provide a Gist ID or a local backup file.",
+      );
+    }
+
+    // Fetch backup data - either from history (if backupId provided) or latest
+    if (backupId) {
+      backup = await getBackupFromHistory(pat, gistId, backupId);
+    } else {
+      backup = await fetchGist(pat, gistId);
+    }
   }
 
   const currentPlatform = getCurrentPlatform();
@@ -351,8 +414,12 @@ export async function runRestore(
 
       // Filter to only selected extensions that aren't already installed
       let extensionsToInstall = backup.extensions
-        .filter((ext) => selectiveRestore.extensions.includes(ext.id))
-        .filter((ext) => !currentExtensions.has(ext.id.toLowerCase()));
+        .filter((ext: { id: string }) =>
+          selectiveRestore.extensions.includes(ext.id),
+        )
+        .filter(
+          (ext: { id: string }) => !currentExtensions.has(ext.id.toLowerCase()),
+        );
 
       // Check for platform-specific extensions
       const { compatible, platformSpecific } = filterPlatformSpecificExtensions(
@@ -484,7 +551,7 @@ export async function runRecoverMissingExtensions(
   context: vscode.ExtensionContext,
   pat: string,
 ): Promise<void> {
-  const gistId = context.globalState.get<string>("ark.gistId");
+  const gistId = context.globalState.get<string>(GIST_ID_KEY);
 
   if (!gistId) {
     throw new Error("No backup history found. Create a backup first.");
@@ -583,4 +650,89 @@ export async function runRecoverMissingExtensions(
       }
     },
   );
+
+  // Offer to restore settings from the latest backup in the linked Gist
+  try {
+    const choice = await vscode.window.showQuickPick(
+      [
+        {
+          label: "Yes, restore settings from Gist",
+          description: "Select and apply settings categories",
+        },
+        { label: "No", description: "Skip restoring settings" },
+      ],
+      {
+        title: "Also restore settings?",
+        placeHolder: "Restore settings from the backup Gist?",
+      },
+    );
+
+    if (choice && choice.label === "Yes, restore settings from Gist") {
+      if (!gistId) {
+        vscode.window.showWarningMessage(
+          "Ark: No Gist ID saved. Use 'Ark: Set Gist ID' or select a local backup file to restore settings.",
+        );
+        return;
+      }
+
+      let backup;
+      try {
+        backup = await fetchGist(pat, gistId);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        vscode.window.showErrorMessage(
+          `Ark: Failed to fetch backup from Gist: ${msg}`,
+        );
+        return;
+      }
+
+      const settingsCategories = Object.keys(backup.settings || {});
+      if (settingsCategories.length === 0) {
+        vscode.window.showInformationMessage(
+          "Ark: No settings found in backup to restore.",
+        );
+        return;
+      }
+
+      const selected = await vscode.window.showQuickPick(
+        settingsCategories.map((c) => ({ label: c, picked: true })),
+        {
+          canPickMany: true,
+          title: "Select Settings to Restore",
+          placeHolder: "Choose settings categories to apply",
+        },
+      );
+
+      if (!selected || selected.length === 0) {
+        vscode.window.showInformationMessage("Ark: Settings restore cancelled");
+        return;
+      }
+
+      const selectedCategories = new Set(selected.map((s) => s.label));
+      const selectedBackupSettings = Object.fromEntries(
+        Object.entries(backup.settings).filter(([k]) =>
+          selectedCategories.has(k),
+        ),
+      );
+
+      const currentSettings = getCurrentSettings();
+      const shouldRestore = await confirmSettingsRestore(
+        currentSettings,
+        selectedBackupSettings,
+      );
+
+      if (shouldRestore) {
+        await writeSettings(selectedBackupSettings);
+        vscode.window.showInformationMessage(
+          "Ark: Selected settings restored.",
+        );
+      } else {
+        vscode.window.showInformationMessage(
+          "Ark: Skipped restoring settings.",
+        );
+      }
+    }
+  } catch (err) {
+    console.error("Ark: Error during settings restore flow:", err);
+  }
 }
